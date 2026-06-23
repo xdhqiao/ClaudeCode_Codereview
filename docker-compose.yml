@@ -1,0 +1,41 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  reviewer:
+    build: .
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MONGODB_URI: ${DOCKER_MONGODB_URI:-mongodb://mongo:27017}
+      WORKSPACE_ROOT: ${DOCKER_WORKSPACE_ROOT:-/data/workspaces}
+      KNOWLEDGE_ROOT: ${DOCKER_KNOWLEDGE_ROOT:-/app/knowledge/standards}
+      ALLOWED_LOCAL_REPO_ROOTS: ${DOCKER_ALLOWED_LOCAL_REPO_ROOTS:-/data/repositories}
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+    depends_on:
+      mongo:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${HOST_API_PORT:-8080}:8080"
+    volumes:
+      - ./knowledge:/app/knowledge:ro
+      - ./repositories:/data/repositories:ro
+      - reviewer-workspaces:/data/workspaces
+
+volumes:
+  mongo-data:
+  reviewer-workspaces:
