@@ -190,7 +190,9 @@ py -3.12 -m venv .venv
 .\scripts\prepare_offline_bundle.ps1 -IncludeWindows -IncludeDockerImages
 ```
 
-生成物位于 `vendor/bundles/`。wheel 和 Docker 镜像通常较大，脚本会：
+Linux wheels 会直接保留在 `vendor/wheels/linux-x86_64/`，可立即用于
+`Dockerfile.offline`；可传输的分片包位于 `vendor/bundles/`。wheel 和
+Docker 镜像通常较大，脚本会：
 
 1. 下载完整依赖闭包；
 2. 检查 Claude SDK wheel 确实包含平台对应的 Claude CLI；
@@ -222,6 +224,7 @@ docker compose -f docker-compose.airgap.yml up -d --build
 ```
 
 离线 Compose 使用 `pull_policy: never`，不会尝试访问 Docker Hub。
+`load_offline_images.sh` 会同时恢复并校验 Linux wheelhouse 和 Docker 镜像。
 `--build` 会从仓库内 `vendor/wheels/linux-x86_64/` 执行离线 pip 安装。
 离线镜像归档包含：
 

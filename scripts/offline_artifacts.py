@@ -30,6 +30,8 @@ def pack_directory(
 ) -> Path:
     source = source.resolve()
     output = output.resolve()
+    if max_part_size <= 0:
+        raise ValueError("max_part_size must be greater than zero")
     if not source.is_dir():
         raise ValueError(f"Source directory does not exist: {source}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -113,17 +115,42 @@ def restore_archive(manifest_path: Path, output_directory: Path) -> Path:
 
 def extract_archive(manifest_path: Path, destination: Path) -> Path:
     destination = destination.resolve()
-    if destination.exists():
-        shutil.rmtree(destination)
-    destination.mkdir(parents=True)
+    if destination.parent == destination:
+        raise ValueError("Refusing to extract an artifact over a filesystem root")
+    temporary = destination.with_name(f".{destination.name}.extracting")
+    backup = destination.with_name(f".{destination.name}.previous")
+    if backup.exists() and not destination.exists():
+        backup.rename(destination)
+    elif backup.exists():
+        shutil.rmtree(backup)
+    if temporary.exists():
+        shutil.rmtree(temporary)
     archive_path = restore_archive(manifest_path, destination.parent / ".archives")
-    with zipfile.ZipFile(archive_path) as archive:
-        root = destination.resolve()
-        for member in archive.infolist():
-            candidate = (root / member.filename).resolve()
-            if candidate != root and not candidate.is_relative_to(root):
-                raise ValueError(f"Unsafe archive member: {member.filename}")
-        archive.extractall(destination)
+    temporary.mkdir(parents=True)
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            root = temporary.resolve()
+            for member in archive.infolist():
+                candidate = (root / member.filename).resolve()
+                if candidate != root and not candidate.is_relative_to(root):
+                    raise ValueError(f"Unsafe archive member: {member.filename}")
+            archive.extractall(temporary)
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+
+    if destination.exists():
+        destination.rename(backup)
+    try:
+        temporary.rename(destination)
+    except Exception:
+        if destination.exists():
+            shutil.rmtree(destination)
+        if backup.exists():
+            backup.rename(destination)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
     return destination
 
 

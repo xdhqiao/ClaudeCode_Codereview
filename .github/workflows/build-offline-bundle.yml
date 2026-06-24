@@ -46,6 +46,9 @@ jobs:
             --platform manylinux_2_17_x86_64 \
             --platform manylinux2014_x86_64 \
             -r requirements/offline-runtime.txt
+          python scripts/verify_offline_wheelhouse.py \
+            vendor/staging/linux-x86_64-py312 \
+            --write-manifest vendor/staging/linux-x86_64-py312/manifest.json
           python scripts/wheelhouse_manifest.py \
             --wheelhouse vendor/staging/linux-x86_64-py312 \
             --output vendor/bundles/linux-x86_64-py312-packages.json \

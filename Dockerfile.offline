@@ -16,6 +16,7 @@ RUN python scripts/verify_offline_wheelhouse.py /opt/wheels \
         --no-deps --no-build-isolation . \
     && pip check \
     && python scripts/verify_claude_runtime.py \
+    && cp /opt/wheels/manifest.json /app/offline-wheelhouse-manifest.json \
     && rm -rf /opt/wheels
 
 RUN chown -R reviewer:reviewer /app

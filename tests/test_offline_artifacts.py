@@ -4,6 +4,7 @@ import zipfile
 from pathlib import Path
 
 from scripts.offline_artifacts import extract_archive, pack_directory, verify_manifest
+from scripts.verify_offline_wheelhouse import inspect_wheel as inspect_linux_wheel
 from scripts.wheelhouse_manifest import inspect_wheel
 
 
@@ -29,6 +30,19 @@ class OfflineArtifactTests(unittest.TestCase):
             self.assertEqual((restored / "package.whl").read_bytes(), b"a" * 512)
             self.assertEqual((restored / "metadata.json").read_text(), "{}")
 
+    def test_failed_restore_preserves_existing_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "restored"
+            destination.mkdir()
+            sentinel = destination / "existing.whl"
+            sentinel.write_bytes(b"keep")
+
+            with self.assertRaises(OSError):
+                extract_archive(root / "missing.parts.json", destination)
+
+            self.assertEqual(sentinel.read_bytes(), b"keep")
+
     def test_wheel_manifest_detects_bundled_claude_cli(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             wheel = Path(directory) / "claude_agent_sdk-0.2.107-py3-none-test.whl"
@@ -53,3 +67,29 @@ class OfflineArtifactTests(unittest.TestCase):
                 metadata["bundled_cli"],
                 ["claude_agent_sdk/_bundled/claude"],
             )
+
+    def test_linux_wheel_validation_rejects_windows_wheel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / "demo-1.0-py3-none-win_amd64.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr(
+                    "demo-1.0.dist-info/METADATA",
+                    "Metadata-Version: 2.1\nName: demo\nVersion: 1.0\n",
+                )
+
+            with self.assertRaisesRegex(ValueError, "unsupported platform"):
+                inspect_linux_wheel(wheel)
+
+    def test_linux_wheel_manifest_includes_checksum(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = Path(directory) / "demo-1.0-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr(
+                    "demo-1.0.dist-info/METADATA",
+                    "Metadata-Version: 2.1\nName: demo\nVersion: 1.0\n",
+                )
+
+            metadata = inspect_linux_wheel(wheel)
+
+            self.assertEqual(metadata["name"], "demo")
+            self.assertEqual(len(metadata["sha256"]), 64)

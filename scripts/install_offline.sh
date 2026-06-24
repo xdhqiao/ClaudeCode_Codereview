@@ -13,10 +13,15 @@ case "$PLATFORM" in
     ;;
 esac
 
-"$PYTHON" "$ROOT/scripts/restore_offline_artifacts.py" \
-  --platform linux-x86_64-py312
-
 WHEELS="$ROOT/vendor/wheels/linux-x86_64"
+set -- "$WHEELS"/*.whl
+if [ ! -e "$1" ]; then
+  "$PYTHON" "$ROOT/scripts/restore_offline_artifacts.py" \
+    --platform linux-x86_64-py312
+fi
+"$PYTHON" "$ROOT/scripts/verify_offline_wheelhouse.py" \
+  "$WHEELS" \
+  --write-manifest "$WHEELS/manifest.json"
 "$PYTHON" -m pip install --no-index --find-links "$WHEELS" hatchling
 "$PYTHON" -m pip install --no-index --find-links "$WHEELS" \
   --no-build-isolation "$ROOT"

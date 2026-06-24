@@ -10,11 +10,12 @@ if ($Version -notmatch "^3\.12\|Windows\|(amd64|x86_64)$") {
     throw "This bundle requires Windows x86_64 with Python 3.12; found $Version"
 }
 
-& $Python (Join-Path $Root "scripts\restore_offline_artifacts.py") `
-    --platform windows-x86_64-py312
-if ($LASTEXITCODE -ne 0) { throw "Failed to restore Windows wheelhouse" }
-
 $Wheels = Join-Path $Root "vendor\wheels\windows-x86_64"
+if (-not (Get-ChildItem -Path $Wheels -Filter "*.whl" -File -ErrorAction SilentlyContinue)) {
+    & $Python (Join-Path $Root "scripts\restore_offline_artifacts.py") `
+        --platform windows-x86_64-py312
+    if ($LASTEXITCODE -ne 0) { throw "Failed to restore Windows wheelhouse" }
+}
 & $Python -m pip install --no-index --find-links $Wheels hatchling
 if ($LASTEXITCODE -ne 0) { throw "Failed to install offline build dependencies" }
 

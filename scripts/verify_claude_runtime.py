@@ -20,16 +20,24 @@ def main() -> int:
         print(f"Bundled Claude Code CLI is missing: {cli}", file=sys.stderr)
         return 1
 
-    result = subprocess.run(
-        [str(cli), "--version"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [str(cli), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        print("Bundled Claude Code CLI version check timed out", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Bundled Claude Code CLI could not start: {exc}", file=sys.stderr)
+        return 1
     if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "no output"
         print(
-            f"Bundled Claude Code CLI failed: {result.stderr.strip()}",
+            f"Bundled Claude Code CLI failed: {detail}",
             file=sys.stderr,
         )
         return 1
