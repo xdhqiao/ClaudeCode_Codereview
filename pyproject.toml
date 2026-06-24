@@ -9,13 +9,13 @@ description = "Repository-aware AI code review service powered by Claude Agent S
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "claude-agent-sdk>=0.2.107,<0.3.0",
+  "claude-agent-sdk==0.2.107",
   "fastapi>=0.115.0,<1.0.0",
   "pydantic>=2.9.0,<3.0.0",
   "pydantic-settings>=2.8.0,<3.0.0",
   "pymongo>=4.10.0,<5.0.0",
   "python-docx>=1.1.2,<2.0.0",
-  "uvicorn[standard]>=0.30.0,<1.0.0",
+  "uvicorn>=0.30.0,<1.0.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,27 @@
+FROM ai-code-review-base:python3.12
+
+WORKDIR /app
+COPY vendor/wheels/linux-x86_64 /opt/wheels
+COPY pyproject.toml README.md ./
+COPY requirements ./requirements
+COPY scripts/verify_offline_wheelhouse.py scripts/verify_claude_runtime.py ./scripts/
+COPY src ./src
+COPY knowledge ./knowledge
+
+RUN python scripts/verify_offline_wheelhouse.py /opt/wheels \
+        --write-manifest /opt/wheels/manifest.json \
+    && pip install --no-index --find-links=/opt/wheels \
+        -r requirements/offline-runtime.txt \
+    && pip install --no-index --find-links=/opt/wheels \
+        --no-deps --no-build-isolation . \
+    && pip check \
+    && python scripts/verify_claude_runtime.py \
+    && rm -rf /opt/wheels
+
+RUN chown -R reviewer:reviewer /app
+USER reviewer
+
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+CMD ["ai-code-review", "serve"]

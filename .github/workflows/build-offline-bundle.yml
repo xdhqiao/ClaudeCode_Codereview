@@ -1,0 +1,136 @@
+name: Build offline deployment bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-offline-bundle.yml"
+      - "Dockerfile.base"
+      - "Dockerfile.offline"
+      - "docker-compose.airgap.yml"
+      - "pyproject.toml"
+      - "requirements/offline-runtime.txt"
+      - "scripts/**"
+      - "src/**"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: offline-bundle
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Download Linux wheelhouse
+        run: |
+          mkdir -p vendor/staging/linux-x86_64-py312 vendor/bundles
+          python -m pip download \
+            --dest vendor/staging/linux-x86_64-py312 \
+            --only-binary=:all: \
+            --implementation cp \
+            --python-version 312 \
+            --abi cp312 \
+            --platform manylinux_2_17_x86_64 \
+            --platform manylinux2014_x86_64 \
+            -r requirements/offline-runtime.txt
+          python scripts/wheelhouse_manifest.py \
+            --wheelhouse vendor/staging/linux-x86_64-py312 \
+            --output vendor/bundles/linux-x86_64-py312-packages.json \
+            --require-claude-cli
+          python scripts/offline_artifacts.py pack \
+            --source vendor/staging/linux-x86_64-py312 \
+            --output vendor/bundles/linux-x86_64-py312-wheels.zip \
+            --max-part-size-mb 90 \
+            --remove-source
+
+      - name: Download Windows wheelhouse
+        run: |
+          mkdir -p vendor/staging/windows-x86_64-py312
+          python -m pip download \
+            --dest vendor/staging/windows-x86_64-py312 \
+            --only-binary=:all: \
+            --implementation cp \
+            --python-version 312 \
+            --abi cp312 \
+            --platform win_amd64 \
+            -r requirements/offline-runtime.txt
+          python scripts/wheelhouse_manifest.py \
+            --wheelhouse vendor/staging/windows-x86_64-py312 \
+            --output vendor/bundles/windows-x86_64-py312-packages.json \
+            --require-claude-cli
+          python scripts/offline_artifacts.py pack \
+            --source vendor/staging/windows-x86_64-py312 \
+            --output vendor/bundles/windows-x86_64-py312-wheels.zip \
+            --max-part-size-mb 90 \
+            --remove-source
+
+      - name: Restore Linux wheels for image build
+        run: |
+          python scripts/restore_offline_artifacts.py \
+            --platform linux-x86_64-py312
+
+      - name: Build offline reviewer image
+        run: |
+          docker build -f Dockerfile.base \
+            -t ai-code-review-base:python3.12 .
+          docker build -f Dockerfile.offline \
+            -t ai-code-review:offline .
+
+      - name: Export reviewer and MongoDB images
+        run: |
+          docker pull mongo:7
+          mkdir -p vendor/staging/docker-images
+          docker save -o \
+            vendor/staging/docker-images/ai-code-review-images.tar \
+            ai-code-review-base:python3.12 ai-code-review:offline mongo:7
+          python scripts/offline_artifacts.py pack \
+            --source vendor/staging/docker-images \
+            --output vendor/bundles/docker-images-linux-x86_64.zip \
+            --max-part-size-mb 90 \
+            --remove-source
+
+      - name: Verify all generated artifacts
+        run: |
+          for manifest in vendor/bundles/*.parts.json; do
+            python scripts/offline_artifacts.py verify --manifest "$manifest"
+          done
+          find vendor/bundles -maxdepth 1 -type f -printf "%f %s bytes\n" | sort
+
+      - name: Package deployment files
+        run: |
+          mkdir -p vendor/staging/deployment/ClaudeCode_Codereview
+          rsync -a \
+            --exclude .git \
+            --exclude .venv \
+            --exclude vendor/bundles \
+            --exclude vendor/staging \
+            --exclude vendor/wheels \
+            --exclude vendor/images \
+            ./ vendor/staging/deployment/ClaudeCode_Codereview/
+          cd vendor/staging/deployment
+          zip -r ../../bundles/ClaudeCode_Codereview-deployment-files.zip \
+            ClaudeCode_Codereview
+
+      - name: Publish offline bundle release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="offline-bundle-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Offline deployment bundle ${GITHUB_RUN_NUMBER}" \
+            --notes "Prebuilt air-gapped deployment assets for Linux x86_64/Python 3.12 and Windows x86_64/Python 3.12. Includes Claude Agent SDK 0.2.107 with bundled Claude Code CLI 2.1.186, all Python dependencies, ai-code-review Docker image, and MongoDB 7 image." \
+            vendor/bundles/*

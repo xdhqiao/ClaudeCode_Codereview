@@ -13,3 +13,7 @@ tests
 workspaces
 data
 repositories
+vendor/wheels/windows-x86_64
+vendor/images
+vendor/bundles
+vendor/staging

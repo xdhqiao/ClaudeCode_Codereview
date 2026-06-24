@@ -11,3 +11,6 @@ build/
 workspaces/
 data/
 repositories/
+vendor/staging/
+vendor/images/
+.publish-worktree/

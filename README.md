@@ -112,6 +112,161 @@ Docker Compose 会把：
 `.env.example` 中不带 `DOCKER_` 前缀的路径和 MongoDB 地址用于本地运行；
 Compose 会使用对应的 `DOCKER_*` 配置。
 
+## 内网离线部署
+
+Claude Agent SDK 不是单纯的 Python 源码包。官方
+`claude-agent-sdk==0.2.107` wheel 内置 Claude Code CLI `2.1.186`，
+所以 Linux 和 Windows 必须分别下载对应平台的 wheel。
+
+本项目当前没有启用外部 Claude 插件、Skills 或第三方 MCP Server：
+
+- Agent 只启用 `Read`、`Glob`、`Grep`。
+- SDK 所需的 Python `mcp` 包及其传递依赖会一并进入 wheelhouse。
+- 仓库内 `.claude` 配置、插件和技能不会被加载。
+
+### 已自动生成的离线包
+
+仓库包含 `Build offline deployment bundle` 工作流。代码推送到 `main` 后，
+GitHub Actions 会自动下载和验证全部依赖，并创建一个
+`offline-bundle-*` Release。Release 中的
+`ClaudeCode_Codereview-deployment-files.zip` 包含部署代码和恢复工具；
+同一 Release 中的所有 `*.part*`、`*.parts.json` 和 `*-packages.json`
+文件放入解压目录的 `vendor/bundles/` 后，即可整体复制到内网服务器。
+不需要在本地运行准备 ps1。
+
+Release 同时包含：
+
+- Linux x86_64 / Python 3.12 完整 wheelhouse；
+- Windows x86_64 / Python 3.12 完整 wheelhouse；
+- Claude Agent SDK `0.2.107` 及内置 Claude Code CLI `2.1.186`；
+- `ai-code-review:offline` Docker 镜像；
+- `mongo:7` Docker 镜像；
+- SHA-256 清单和分片恢复工具。
+
+### Docker 中的离线 pip 安装方式
+
+最终 Docker 构建直接读取：
+
+```text
+vendor/wheels/linux-x86_64/
+```
+
+[Dockerfile.offline](Dockerfile.offline) 在构建阶段依次执行：
+
+```bash
+python scripts/verify_offline_wheelhouse.py /opt/wheels
+pip install --no-index --find-links=/opt/wheels \
+  -r requirements/offline-runtime.txt
+pip install --no-index --find-links=/opt/wheels \
+  --no-deps --no-build-isolation .
+pip check
+python scripts/verify_claude_runtime.py
+```
+
+因此 Python 包安装阶段不会访问 PyPI。构建会在以下情况立即失败：
+
+- wheelhouse 不完整；
+- Claude Agent SDK 版本不是 `0.2.107`；
+- SDK wheel 没有内置 Linux Claude Code CLI；
+- 传递依赖冲突；
+- 内置 CLI 无法在容器中执行。
+
+内网服务器只需具备离线导入的 Docker 镜像和此项目目录，不需要运行
+PowerShell，也不需要访问互联网。
+
+### 1. 在可联网机器准备离线包
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 默认生成 Linux x86_64 / Python 3.12 wheelhouse
+.\scripts\prepare_offline_bundle.ps1
+
+# 同时生成 Windows 本地安装包
+.\scripts\prepare_offline_bundle.ps1 -IncludeWindows
+
+# 同时构建并导出 reviewer + MongoDB Docker 镜像
+.\scripts\prepare_offline_bundle.ps1 -IncludeWindows -IncludeDockerImages
+```
+
+生成物位于 `vendor/bundles/`。wheel 和 Docker 镜像通常较大，脚本会：
+
+1. 下载完整依赖闭包；
+2. 检查 Claude SDK wheel 确实包含平台对应的 Claude CLI；
+3. 生成包名、版本和 SHA-256 清单；
+4. 打包并拆成小于 100 MB 的分片，便于普通 Git 仓库存储；
+5. 对所有分片做 SHA-256 校验。
+
+应将以下内容提交或复制到内网：
+
+```text
+vendor/bundles/
+scripts/
+Dockerfile.offline
+docker-compose.airgap.yml
+```
+
+### 2. 离线服务器使用 Docker
+
+联网准备阶段必须使用 `-IncludeDockerImages`。把完整仓库复制到内网服务器后：
+
+```bash
+python3 scripts/offline_artifacts.py verify \
+  --manifest vendor/bundles/docker-images-linux-x86_64.zip.parts.json
+
+sh scripts/load_offline_images.sh
+cp .env.example .env
+# 编辑 .env，填写内网模型网关地址和认证信息
+docker compose -f docker-compose.airgap.yml up -d --build
+```
+
+离线 Compose 使用 `pull_policy: never`，不会尝试访问 Docker Hub。
+`--build` 会从仓库内 `vendor/wheels/linux-x86_64/` 执行离线 pip 安装。
+离线镜像归档包含：
+
+- `ai-code-review-base:python3.12`：已安装 Git、OpenSSH 和 CA 证书；
+- `ai-code-review:offline`：预构建 reviewer 镜像；
+- `mongo:7`：MongoDB。
+
+即使重新构建 reviewer，也不会下载 Python 包。
+
+### 3. 离线 Linux 直接安装
+
+服务器必须预装 Python 3.12、Git、OpenSSH Client 和 CA 证书：
+
+```bash
+sh scripts/install_offline.sh
+cp .env.example .env
+ai-code-review serve
+```
+
+### 4. 离线 Windows 直接安装
+
+准备包时需使用 `-IncludeWindows`：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+.\scripts\install_offline.ps1 -Python .\.venv\Scripts\python.exe
+Copy-Item .env.example .env
+ai-code-review serve
+```
+
+### 5. 内网模型网关
+
+“服务器不能连接互联网”不代表可以省略模型服务。Claude Agent SDK 仍需访问一个
+内网可达、兼容 Anthropic Messages API 和工具调用的模型网关：
+
+```dotenv
+ANTHROPIC_BASE_URL=http://llm-gateway.internal:4000
+ANTHROPIC_AUTH_TOKEN=internal-token
+ANTHROPIC_API_KEY=
+```
+
+服务已设置 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`，不会主动进行非必要的
+Claude Code 网络请求。建议同时在主机或容器层只放行内网 Git、MongoDB 和模型网关。
+
 健康检查：
 
 ```powershell
