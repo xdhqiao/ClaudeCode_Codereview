@@ -37,8 +37,8 @@ services:
     ports:
       - "${HOST_API_PORT:-8080}:8080"
     volumes:
-      - ./knowledge:/app/knowledge:ro
-      - ./repositories:/data/repositories:ro
+      - ${HOST_KNOWLEDGE_PATH:-./knowledge}:/app/knowledge:ro
+      - ${HOST_REPOSITORIES_PATH:-./repositories}:/data/repositories:ro
       - reviewer-workspaces:/data/workspaces
 
 volumes:

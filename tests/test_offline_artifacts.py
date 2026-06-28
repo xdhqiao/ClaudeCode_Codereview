@@ -43,6 +43,39 @@ class OfflineArtifactTests(unittest.TestCase):
 
             self.assertEqual(sentinel.read_bytes(), b"keep")
 
+    def test_repacking_removes_stale_archive_parts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "package.whl").write_bytes(b"a" * 64)
+            output = root / "bundles" / "wheels.zip"
+
+            first_manifest = pack_directory(
+                source,
+                output,
+                max_part_size=16,
+                remove_source=False,
+            )
+            first_parts = sorted(
+                output.parent.glob("wheels.zip.part[0-9][0-9][0-9]")
+            )
+            self.assertGreater(len(first_parts), 1)
+
+            (source / "package.whl").write_bytes(b"b")
+            pack_directory(
+                source,
+                output,
+                max_part_size=1024,
+                remove_source=False,
+            )
+
+            current_parts = sorted(
+                output.parent.glob("wheels.zip.part[0-9][0-9][0-9]")
+            )
+            self.assertEqual(len(current_parts), 1)
+            self.assertTrue(first_manifest.is_file())
+
     def test_wheel_manifest_detects_bundled_claude_cli(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             wheel = Path(directory) / "claude_agent_sdk-0.2.107-py3-none-test.whl"

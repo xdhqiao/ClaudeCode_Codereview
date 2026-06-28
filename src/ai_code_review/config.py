@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -75,6 +76,14 @@ class Settings(BaseSettings):
     def empty_url_to_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
             return None
+        if isinstance(value, str):
+            normalized = value.strip().rstrip("/")
+            parsed = urlparse(normalized)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise ValueError(
+                    "ANTHROPIC_BASE_URL must be an http:// or https:// URL with a host"
+                )
+            return normalized
         return value
 
     @field_validator("allowed_local_repo_roots", mode="before")
@@ -118,5 +127,5 @@ class Settings(BaseSettings):
         if self.anthropic_auth_token:
             env["ANTHROPIC_AUTH_TOKEN"] = self.anthropic_auth_token.get_secret_value()
         if self.anthropic_base_url:
-            env["ANTHROPIC_BASE_URL"] = self.anthropic_base_url.rstrip("/")
+            env["ANTHROPIC_BASE_URL"] = self.anthropic_base_url
         return env

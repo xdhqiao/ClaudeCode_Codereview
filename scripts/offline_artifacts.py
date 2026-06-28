@@ -35,6 +35,9 @@ def pack_directory(
     if not source.is_dir():
         raise ValueError(f"Source directory does not exist: {source}")
     output.parent.mkdir(parents=True, exist_ok=True)
+    for stale_part in output.parent.glob(f"{output.name}.part[0-9][0-9][0-9]"):
+        stale_part.unlink()
+    output.with_name(f"{output.name}.parts.json").unlink(missing_ok=True)
     if output.exists():
         output.unlink()
 

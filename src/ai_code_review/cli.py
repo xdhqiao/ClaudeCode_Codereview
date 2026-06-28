@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import logging
+import sys
 from pathlib import Path
 
 import uvicorn
@@ -11,16 +12,33 @@ import uvicorn
 from ai_code_review.api.app import create_app
 from ai_code_review.bootstrap import build_container
 from ai_code_review.config import Settings
+from ai_code_review.diagnostics import build_config_report, validate_config_paths
 from ai_code_review.domain.models import ReviewMode, ReviewTaskCreate
 from ai_code_review.infrastructure.knowledge import import_docx_standard
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ai-code-review")
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path(".env"),
+        help="Environment file to load (default: .env)",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("serve", help="Start HTTP API and task workers")
     subparsers.add_parser("worker", help="Start task workers only")
+    check_config = subparsers.add_parser(
+        "check-config",
+        help="Validate configuration without exposing secrets",
+    )
+    check_config.add_argument(
+        "--deployment",
+        choices=["docker", "native"],
+        default="docker",
+        help="Validate URL and paths for Docker or native Linux",
+    )
 
     enqueue = subparsers.add_parser("enqueue", help="Create a review task")
     enqueue.add_argument("--project-id", required=True)
@@ -76,7 +94,7 @@ async def _enqueue(args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = _build_parser().parse_args()
-    settings = Settings()
+    settings = Settings(_env_file=args.env_file)
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -102,8 +120,16 @@ def main() -> None:
             version=args.version,
         )
         print(output)
+    elif args.command == "check-config":
+        report = build_config_report(settings, deployment=args.deployment)
+        report["warnings"] = [
+            *report["warnings"],
+            *validate_config_paths(settings),
+        ]
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if report["errors"]:
+            sys.exit(2)
 
 
 if __name__ == "__main__":
     main()
-

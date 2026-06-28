@@ -95,10 +95,22 @@ GET /api/v1/tasks/{task_id}/legacy-result?file_name=src/example.py
 
 ### Docker Compose
 
+Windows：
+
 ```powershell
 Copy-Item .env.example .env
 # 编辑 .env，至少填写 ANTHROPIC_API_KEY
 docker compose up --build
+```
+
+Linux：
+
+```bash
+sh scripts/setup_linux.sh
+vi .env
+docker compose run --rm reviewer \
+  ai-code-review check-config --deployment docker
+docker compose up -d --build
 ```
 
 Docker Compose 会把：
@@ -111,6 +123,17 @@ Docker Compose 会把：
 `HOST_API_PORT`，例如 `HOST_API_PORT=18080`。
 `.env.example` 中不带 `DOCKER_` 前缀的路径和 MongoDB 地址用于本地运行；
 Compose 会使用对应的 `DOCKER_*` 配置。
+
+Linux 上可以把宿主机已有代码目录直接挂载进容器：
+
+```dotenv
+HOST_REPOSITORIES_PATH=/srv/company/repositories
+HOST_KNOWLEDGE_PATH=/srv/company/code-standards
+DOCKER_ALLOWED_LOCAL_REPO_ROOTS=/data/repositories
+```
+
+任务中的 `local_path` 仍应填写容器路径，例如
+`/data/repositories/project-a`，不能填写 `/srv/company/repositories/project-a`。
 
 ## 内网离线部署
 
@@ -176,6 +199,8 @@ PowerShell，也不需要访问互联网。
 
 ### 1. 在可联网机器准备离线包
 
+Windows：
+
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -188,6 +213,20 @@ py -3.12 -m venv .venv
 
 # 同时构建并导出 reviewer + MongoDB Docker 镜像
 .\scripts\prepare_offline_bundle.ps1 -IncludeWindows -IncludeDockerImages
+```
+
+Linux x86_64：
+
+```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+
+# 下载并打包 Linux/Python 3.12 wheelhouse
+sh scripts/prepare_offline_bundle.sh
+
+# 同时构建并导出 reviewer、基础镜像和 MongoDB 镜像
+sh scripts/prepare_offline_bundle.sh --include-docker-images
 ```
 
 Linux wheels 会直接保留在 `vendor/wheels/linux-x86_64/`，可立即用于
@@ -218,8 +257,10 @@ python3 scripts/offline_artifacts.py verify \
   --manifest vendor/bundles/docker-images-linux-x86_64.zip.parts.json
 
 sh scripts/load_offline_images.sh
-cp .env.example .env
+sh scripts/setup_linux.sh
 # 编辑 .env，填写内网模型网关地址和认证信息
+docker compose -f docker-compose.airgap.yml run --rm reviewer \
+  ai-code-review check-config --deployment docker
 docker compose -f docker-compose.airgap.yml up -d --build
 ```
 
@@ -325,6 +366,25 @@ CLAUDE_MODEL=claude-sonnet-4-6
 
 ```dotenv
 ANTHROPIC_BASE_URL=http://host.docker.internal:4000
+```
+
+Linux 上宿主机模型服务不能只监听 `127.0.0.1`；它必须监听
+`0.0.0.0:4000`、Docker 网桥地址，或者与 reviewer 容器处于同一个
+Docker 网络。如果模型网关本身也是 Compose 服务，可直接使用服务名：
+
+```dotenv
+ANTHROPIC_BASE_URL=http://llm-gateway:4000
+```
+
+可随时执行脱敏配置检查，输出不会包含模型 Key 或 MongoDB 密码：
+
+```bash
+# Docker
+docker compose exec reviewer ai-code-review check-config --deployment docker
+
+# Linux 原生运行
+ai-code-review --env-file /etc/ai-code-review.env \
+  check-config --deployment native
 ```
 
 不要在镜像、源码或任务表中保存模型密钥；生产环境应使用 Secret Manager、Kubernetes Secret 或等价设施注入。
